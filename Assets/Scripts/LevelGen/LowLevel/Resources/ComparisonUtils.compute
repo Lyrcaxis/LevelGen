@@ -1,0 +1,32 @@
+#pragma kernel Equals
+#pragma kernel NotEquals
+#pragma kernel GreaterThan
+#pragma kernel GreaterThanOrEquals
+#pragma kernel LessThan
+#pragma kernel LessThanOrEquals
+#pragma kernel TextureEquals
+#pragma kernel TextureNotEquals
+#pragma kernel TextureGreaterThan
+#pragma kernel TextureGreaterThanOrEquals
+#pragma kernel TextureLessThan
+#pragma kernel TextureLessThanOrEquals
+
+Texture2D<half> a; Texture2D<half> b; // Input textures for element-wise comparisons.
+RWTexture2D<half> output; // Output texture. Also used as input for fixed comparisons.
+half value; // Comparison float value for fixed value comparisons.
+
+// ------------------------------------ Fixed Comparisons (between the Texture and the 'value') ------------------------------------
+[numthreads(8, 8, 1)] void Equals(uint3 id: SV_DispatchThreadID)                     { output[id.xy] = output[id.xy] == value; } // 0
+[numthreads(8, 8, 1)] void NotEquals(uint3 id: SV_DispatchThreadID)                  { output[id.xy] = output[id.xy] != value; } // 1
+[numthreads(8, 8, 1)] void GreaterThan(uint3 id: SV_DispatchThreadID)                { output[id.xy] = output[id.xy] > value; }  // 2
+[numthreads(8, 8, 1)] void GreaterThanOrEquals(uint3 id: SV_DispatchThreadID)        { output[id.xy] = output[id.xy] >= value; } // 3
+[numthreads(8, 8, 1)] void LessThan(uint3 id: SV_DispatchThreadID)                   { output[id.xy] = output[id.xy] < value; }  // 4
+[numthreads(8, 8, 1)] void LessThanOrEquals(uint3 id: SV_DispatchThreadID)           { output[id.xy] = output[id.xy] <= value; } // 5
+
+// ------------------------------------ Element-wise Comparisons (between two textures' values) ------------------------------------
+[numthreads(8, 8, 1)] void TextureEquals(uint3 id: SV_DispatchThreadID)              { output[id.xy] = a[id.xy] == b[id.xy]; }   // 6
+[numthreads(8, 8, 1)] void TextureNotEquals(uint3 id: SV_DispatchThreadID)           { output[id.xy] = a[id.xy] != b[id.xy]; }   // 7
+[numthreads(8, 8, 1)] void TextureGreaterThan(uint3 id: SV_DispatchThreadID)         { output[id.xy] = a[id.xy] >  b[id.xy]; }   // 8
+[numthreads(8, 8, 1)] void TextureGreaterThanOrEquals(uint3 id: SV_DispatchThreadID) { output[id.xy] = a[id.xy] >= b[id.xy]; }   // 9
+[numthreads(8, 8, 1)] void TextureLessThan(uint3 id: SV_DispatchThreadID)            { output[id.xy] = a[id.xy] <  b[id.xy]; }   // 10
+[numthreads(8, 8, 1)] void TextureLessThanOrEquals(uint3 id: SV_DispatchThreadID)    { output[id.xy] = a[id.xy] <= b[id.xy]; }   // 11

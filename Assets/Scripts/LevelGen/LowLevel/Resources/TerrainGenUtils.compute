@@ -1,0 +1,57 @@
+#pragma kernel CreateHeightBasedTerrain
+#pragma kernel CreateGrass
+#pragma kernel SmoothIsolatedIsleShapes
+#include "ComputeHelpers.hlsl"
+
+Texture2D<half> input;    // Input texture (0 = unavailable, 1 = available)
+RWStructuredBuffer<int> heightPosBuffer; // Contains the minimum height of each column.
+RWTexture2D<half> output; // Output texture.
+
+[numthreads(8, 8, 1)] void CreateHeightBasedTerrain(uint3 id : SV_DispatchThreadID) { // 0
+    if (!isInBounds(id.xy) || input[id.xy] == 0) { return; }
+
+    output[id.xy] = uint(id.y) >= uint(heightPosBuffer[id.x]);
+}
+// Shapes: 0 = square with full center, 1 = square with empty center, 2 = horizontal path, 3 = vertical path, 4 = cross, 5 = inverse cross (disabled)
+[numthreads(8, 8, 1)] void CreateGrass(uint3 id : SV_DispatchThreadID) {   // 1
+    if (!isInBounds(id.xy) || input[id.xy] == 0) { return; }
+
+    // Get a random number from 0-110. Each shape type has a weight associated with it.
+    // The weights could have been populated from the inspector and be passed as a buffer, but I hardcoded them for time's sake.
+    int rndShape = lerp(0, 110, rand(id.xy).x);       // 0-20: square, 20-30: square_no_center, 30-50: horizontal_path, 50-70: vertical_path, 70-85: cross, >=85: empty.
+    int rndSize = lerp(1, 3, rand(id.xy).y);          // A random size for the shape. We expect a lot of small shapes, so we use a small size.
+    int rndSecondarySize = lerp(0, 3, rand(id.xy).z); // A secondary random size for the shape. To be used as width for vertical paths, height for horizontal paths, etc.
+
+    if (rndShape < 20) { // Render square with full center
+        for (int x = -rndSize; x <= rndSize; x++) { for (int y = -rndSize; y <= rndSize; y++) { output[id.xy + int2(x, y)] = 1; } }
+    } else if (rndShape < 30) { // Render square with empty center
+        for (int x = -rndSize; x <= rndSize; x++) { for (int y = -rndSize; y <= rndSize; y++) { if (x != 0 || y != 0) { output[id.xy + int2(x, y)] = 1; } } }
+    } else if (rndShape < 50) { // Render horizontal path
+        for (int x = -rndSize; x <= rndSize; x++) { for (int y = -rndSecondarySize; y <= rndSecondarySize; y++) { output[id.xy + int2(x, y)] = 1; } }
+    } else if (rndShape < 70) { // Render vertical path
+        for (int y = -rndSize; y <= rndSize; y++) { for (int x = -rndSecondarySize; x <= rndSecondarySize; x++) { output[id.xy + int2(x, y)] = 1; } }
+    } else if (rndShape < 85) { // Render cross
+        for (int x = -rndSize; x <= rndSize; x++) { for (int y = -rndSecondarySize; y <= rndSecondarySize; y++) { output[id.xy + int2(x, y)] = 1; } }
+        for (int y = -rndSize; y <= rndSize; y++) { for (int x = -rndSecondarySize; x <= rndSecondarySize; x++) { output[id.xy + int2(x, y)] = 1; } }
+    } else if (rndShape < 100){ // Render inverse cross (disabled because it's generating too much empty space)
+        // for (int x = -rndSize; x <= rndSize; x++) { for (int y = -rndSize; y <= rndSize; y++) { output[id.xy + int2(x, y)] = 1; } }
+        // for (int xx = -rndSize; xx <= rndSize; xx++) { output[id.xy + int2(xx, 0)] = 0; output[id.xy + int2(0, xx)] = 0; }
+    }
+}
+[numthreads(8, 8, 1)] void SmoothIsolatedIsleShapes(uint3 id : SV_DispatchThreadID) {   // 2
+    if (!isInBounds(id.xy) || input[id.xy] == 0) { return; }
+    uint2 topNeighbor = id.xy + int2(0, 1);
+
+    // If this tile is not bottom-most, doesn't have a top neighbor, or the top neighbor is not the top-most, there's no chance this is an isolated shape.
+    if (input[id.xy + int2(0, -1)] != 0 || input[topNeighbor] != 1 || input[topNeighbor + int2(0, 1)] != 0) { return; } // .. so no need to check further.
+
+    // Otherwise, there's a chance this and the top-neighbor form an isolated shape. We'll go through two cases to check if this is true.
+    // Case 1: If there are no horizontal neighbors and the top neighbor only has the bottom neighbor available, check if it's isolated horizontally or it's bordering a cliff.
+    // Case 2: If this (bottom-most) tile is bordering with a cliff horizontally, and the top-neighbor is fully isolated horizontally, it's still an isolated shape.
+    if ((input[id.xy + int2(-1, 0)] == 0 || input[topNeighbor + int2(-1, 0)] == 0) && (input[id.xy + int2(1, 0)] == 0 || input[topNeighbor + int2(1, 0)] == 0)) {
+        if ((input[topNeighbor + int2(-1, 0)] == 0 || input[topNeighbor + int2(-1, -1)] == 0) && (input[topNeighbor + int2(1, 0)] == 0 || input[topNeighbor + int2(1, -1)] == 0)) {
+            output[id.xy] = 0;          // ...
+            output[topNeighbor] = 0;    // .. because if top neighbor has a side but it's a cliff tile, this is still an isolated shape.
+        }
+    }
+}

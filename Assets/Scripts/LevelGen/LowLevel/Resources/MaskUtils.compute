@@ -1,0 +1,17 @@
+#pragma kernel ApplyMask
+#pragma kernel IntersectAdd
+#pragma kernel IntersectRem
+#pragma kernel InvertMask
+#pragma kernel ApplyMask4
+
+
+RWTexture2D<half> output;   // Input and output texture (0 = empty, 1 = filled)
+Texture2D<half> mask;       // Shape to intersect with  (0 = empty, 1 = filled)
+RWTexture2D<half4> output4; // For 4-channel textures.
+// ----------------------------------------------------- For 1-channel textures -----------------------------------------------------
+[numthreads(8,8,1)] void ApplyMask(uint3 id: SV_DispatchThreadID)    { if (mask[id.xy] == 0) { output[id.xy] = 0; } }  // 0
+[numthreads(8,8,1)] void IntersectAdd(uint3 id: SV_DispatchThreadID) { if (mask[id.xy] != 0) { output[id.xy] = 1; } }  // 1
+[numthreads(8,8,1)] void IntersectRem(uint3 id: SV_DispatchThreadID) { if (mask[id.xy] != 0) { output[id.xy] = 0; } }  // 2
+[numthreads(8,8,1)] void InvertMask(uint3 id: SV_DispatchThreadID)   { output[id.xy] = output[id.xy] == 0; }           // 3
+// ----------------------------------------------------- For 4-channel textures -----------------------------------------------------
+[numthreads(8,8,1)] void ApplyMask4(uint3 id: SV_DispatchThreadID)   { if (mask[id.xy] == 0) { output4[id.xy] = 0; } } // 4

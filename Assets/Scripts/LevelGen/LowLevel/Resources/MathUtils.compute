@@ -1,0 +1,22 @@
+#pragma kernel AddValue
+#pragma kernel SubtractValue
+#pragma kernel ScaleValues
+#pragma kernel ApplyMin
+#pragma kernel ApplyMax
+#pragma kernel AddTexture
+#pragma kernel SubtractTexture
+#pragma kernel ScaleTexture
+#include "ComputeHelpers.hlsl"
+
+Texture2D<half> input;     // Input texture for texture operations.
+RWTexture2D<half> output;  // Output texture. Also used as input for scalar operations.
+half value; // multi-purpose float. Used as a scalar or a flag.
+
+[numthreads(8, 8, 1)] void AddValue(uint3 id: SV_DispatchThreadID)        { if (isInBounds(id.xy)) { output[id.xy] += value; } }        // 0
+[numthreads(8, 8, 1)] void SubtractValue(uint3 id: SV_DispatchThreadID)   { if (isInBounds(id.xy)) { output[id.xy] -= value; } }        // 1
+[numthreads(8, 8, 1)] void ScaleValues(uint3 id: SV_DispatchThreadID)     { if (isInBounds(id.xy)) { output[id.xy] *= value; } }        // 2
+[numthreads(8, 8, 1)] void ApplyMin(uint3 id: SV_DispatchThreadID)        { output[id.xy] = min(output[id.xy], value); }                // 3
+[numthreads(8, 8, 1)] void ApplyMax(uint3 id: SV_DispatchThreadID)        { output[id.xy] = max(output[id.xy], value); }                // 4
+[numthreads(8, 8, 1)] void AddTexture(uint3 id: SV_DispatchThreadID)      { if (isInBounds(id.xy)) { output[id.xy] += input[id.xy]; } } // 5
+[numthreads(8, 8, 1)] void SubtractTexture(uint3 id: SV_DispatchThreadID) { if (isInBounds(id.xy)) { output[id.xy] -= input[id.xy]; } } // 6
+[numthreads(8, 8, 1)] void ScaleTexture(uint3 id: SV_DispatchThreadID)    { if (isInBounds(id.xy)) { output[id.xy] *= input[id.xy]; } } // 7

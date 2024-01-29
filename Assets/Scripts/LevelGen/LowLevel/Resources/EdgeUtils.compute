@@ -1,0 +1,52 @@
+#pragma kernel RenderEdges
+#pragma kernel ExpandShape
+#pragma kernel HasNeighbor
+#pragma kernel NeighborsWith
+#include "ComputeHelpers.hlsl"
+#include "EdgeEnumFlags.hlsl"
+
+Texture2D<half> input; RWTexture2D<half> output;
+float2 neighborDirectionCheck; // The direction to check for neighbors.
+
+
+[numthreads(8, 8, 1)] void RenderEdges(uint3 id: SV_DispatchThreadID) { // 0
+    if (!isInBounds(id.xy) || input[id.xy] == 0) { return; } // Input is the height map.
+    half edgeType = 0; // Tiles that have a neighbor that's not 0 are edges. Find them.
+    if (id.x < uint(texSize.x - 1) && input[int2(id.x + 1, id.y)] == 0) { edgeType += RIGHT; }
+    if (id.x > 0                   && input[int2(id.x - 1, id.y)] == 0) { edgeType += LEFT; }
+    if (id.y < uint(texSize.y - 1) && input[int2(id.x, id.y + 1)] == 0) { edgeType += TOP;}
+    if (id.y > 0                   && input[int2(id.x, id.y - 1)] == 0) { edgeType += BOTTOM; }
+    output[id.xy] = edgeType; // Store the edge type for future use -- when expanding or drawing.
+}
+
+[numthreads(8, 8, 1)] void ExpandShape(uint3 id: SV_DispatchThreadID) { // 1
+    if (!isInBounds(id.xy)) { return; } // Input is the edge type map.
+    uint edgeType = input[id.xy];       // Expand all edges based on the edge type.
+    if (edgeType == 0) { return; }      // The edge type is defined by the flag enum.
+    if ((edgeType & RIGHT)        == RIGHT)         { output[int2(id.x + 1, id.y + 0)] = 1; }
+    if ((edgeType & LEFT)         == LEFT)          { output[int2(id.x - 1, id.y + 0)] = 1; }
+    if ((edgeType & TOP)          == TOP)           { output[int2(id.x + 0, id.y + 1)] = 1; }
+    if ((edgeType & BOTTOM)       == BOTTOM)        { output[int2(id.x + 0, id.y - 1)] = 1; }
+    if ((edgeType & TOP_RIGHT)    == TOP_RIGHT)     { output[int2(id.x + 1, id.y + 1)] = 1; }
+    if ((edgeType & TOP_LEFT)     == TOP_LEFT)      { output[int2(id.x - 1, id.y + 1)] = 1; }
+    if ((edgeType & BOTTOM_RIGHT) == BOTTOM_RIGHT)  { output[int2(id.x + 1, id.y - 1)] = 1; }
+    if ((edgeType & BOTTOM_LEFT)  == BOTTOM_LEFT)   { output[int2(id.x - 1, id.y - 1)] = 1; }
+}
+
+[numthreads(8, 8, 1)] void HasNeighbor(uint3 id: SV_DispatchThreadID) { // 2
+    if (!isInBounds(id.xy)) { return; } // Input is the height map.
+
+    // Check if there's a neighbor on that position. This can be used in combination with edge info to find inner corners.
+    // For example, if there's a neighbor to the top and right, but not to the top right, then it's an inner corner.
+    // In addition, it can be used to control object clustering, by scanning for neighbors before placing an object.
+    uint2 posToCheck = id.xy + int2(neighborDirectionCheck);
+    output[id.xy] = (isInBounds(posToCheck) && input[posToCheck] != 0);
+}
+[numthreads(8, 8, 1)] void NeighborsWith(uint3 id: SV_DispatchThreadID) { // 3
+    if (!isInBounds(id.xy) || output[id.xy] == 0) { return; } // Input is the height map we're checking if we're bordering with.
+    // Check if input texture has any 'active' neighbors on that position, and set the output accordingly.
+    output[id.xy] = (id.x < uint(texSize.x - 1) && input[int2(id.x + 1, id.y)] != 0)
+                 || (id.x > 0                   && input[int2(id.x - 1, id.y)] != 0)
+                 || (id.y < uint(texSize.y - 1) && input[int2(id.x, id.y + 1)] != 0)
+                 || (id.y > 0                   && input[int2(id.x, id.y - 1)] != 0);
+}

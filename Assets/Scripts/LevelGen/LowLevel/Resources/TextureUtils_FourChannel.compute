@@ -1,0 +1,54 @@
+#pragma kernel Copy
+#pragma kernel ToBinaryMask
+#pragma kernel GetNoiseMap
+#pragma kernel GetPixels
+#pragma kernel SetPixels
+#pragma kernel DoubleResolution
+#pragma kernel CountIndices
+#pragma kernel GetIndices
+#pragma kernel GetRandomPosition
+#include "ComputeHelpers.hlsl"
+
+Texture2D<half4> input; RWTexture2D<half4> output; // 4-channel equivalent of 'TextureUtils_SingleChannel'.
+RWStructuredBuffer<half4> buffer;    // Used to retrieve a RenderTexture's pixels from the GPU, or set them from the CPU.
+half noiseThreshold;                 // Random values below this threshold will be set to 0, and above it to 1.
+
+RWStructuredBuffer<int> countBuffer; // Used to return the number of set pixels in the input texture.
+RWStructuredBuffer<half2> posBuffer; // Used to return the positions of the set pixels in the input texture.
+
+[numthreads(8, 8, 1)] void Copy(uint3 id: SV_DispatchThreadID)         { output[id.xy] = input[id.xy]; }                    // 0
+[numthreads(8, 8, 1)] void ToBinaryMask(uint3 id: SV_DispatchThreadID) { output[id.xy] = input[id.xy] != 0; }               // 1
+[numthreads(8, 8, 1)] void GetNoiseMap(uint3 id: SV_DispatchThreadID)  { output[id.xy] = randBit4(id.xy, noiseThreshold); } // 2
+[numthreads(8, 8, 1)] void GetPixels(uint3 id: SV_DispatchThreadID)    { buffer[id.x + id.y * texSize.x] = input[id.xy]; }  // 3
+[numthreads(8, 8, 1)] void SetPixels(uint3 id: SV_DispatchThreadID)    { output[id.xy] = buffer[id.x + id.y * texSize.x]; } // 4
+
+[numthreads(8, 8, 1)] void DoubleResolution(uint3 id : SV_DispatchThreadID) {   // 5
+    if (!isInBounds(id.xy)) { return; }
+
+    // We simply copy each pixel 4 times, effectively doubling the resolution.
+    uint2 upscaledPos = 2 * uint2(id.xy);
+    output[upscaledPos + uint2(0, 0)] = input[id.xy];
+    output[upscaledPos + uint2(1, 0)] = input[id.xy];
+    output[upscaledPos + uint2(0, 1)] = input[id.xy];
+    output[upscaledPos + uint2(1, 1)] = input[id.xy];
+}
+[numthreads(8, 8, 1)] void CountIndices(uint3 id : SV_DispatchThreadID) {       // 6
+    if (!isInBounds(id.xy) || all(input[id.xy] == 0)) { return; } // Skip empty pixels.
+    
+    // Add 1 to the valid count. We'll later use the total count to create a buffer of the right size.
+    InterlockedAdd(countBuffer[0], 1); // This will allow efficient retrieval of the indices on the CPU.
+}
+[numthreads(8, 8, 1)] void GetIndices(uint3 id : SV_DispatchThreadID) {         // 7
+    if (!isInBounds(id.xy) || all(input[id.xy] == 0)) { return; } // Skip empty pixels.
+
+    int localCounter = 0; // For each valid pixel, add its `id.xy` to the positions buffer. Order doesn't matter.
+    InterlockedAdd(countBuffer[0], -1, localCounter); // Substracting -1 allows us to actually keep track of the last set index,
+    posBuffer[localCounter - 1] = half2(id.xy);      // ..effectively the equivalent of a thread-safe `List.Add(id)` in C#.
+}
+[numthreads(8, 8, 1)] void GetRandomPosition(uint3 id : SV_DispatchThreadID) {   // 8
+    if (!isInBounds(id.xy) || input[id.xy] == 0) { return; } // Skip empty pixels.
+
+    int localCounter = 0; // For each valid pixel, substract 1 from the count buffer. Order could be helpful here, but isn't necessary.
+    InterlockedAdd(countBuffer[0], -1, localCounter);            // When the count reaches 0, we've found our pixel.
+    if (localCounter == 0) { posBuffer[0] = half2(id.x, id.y); } // .. and we can then return its position.
+}

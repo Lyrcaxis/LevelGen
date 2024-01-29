@@ -1,0 +1,67 @@
+#pragma kernel CalculateSpace
+#pragma kernel CalculateAreas
+#pragma kernel CountValidPositions
+#pragma kernel SelectPositionAtIndex
+#include "ComputeHelpers.hlsl"
+
+Texture2D<half> heightMap;
+RWTexture2D<half4> spaces; // How much space is available per direction [x = right, y = left, z = top, w = bot]
+RWTexture2D<half4> areas;  // Available areas with Bottom-Left as anchor. Each component of the pixel is the area for a different isle type
+half4 isleTypeHeights;     // e.g: float4(3,5,7,10) if we want to calculate areas for isles of height 3, 5, 7 and 10 respectively.
+
+// ------------------------------------------ Area Calculation ------------------------------------------
+[numthreads(8, 8, 1)] void CalculateSpace(uint3 id: SV_DispatchThreadID) {  // 0
+    if (!isInBounds(id.xy) || heightMap[id.xy] == 0) { return; }
+    
+    // Check how many spaces are available in each direction, by going to each direction until we reach a non-empty tile.
+    float4 totalSpace = float4(0, 0, 0, 0); // Each component holds the amount of empty tiles in each direction.
+    int4 cur = int4(id.x + 1, id.x - 1, id.y + 1, id.y - 1); // Start offsets for right, left, top, bot.
+    while (cur.x < int(texSize.x) && heightMap[int2(cur.x, id.y)] != 0) { totalSpace.x++; cur.x++; } // Right
+    while (cur.y >= 0             && heightMap[int2(cur.y, id.y)] != 0) { totalSpace.y++; cur.y--; } // Left
+    while (cur.z < int(texSize.y) && heightMap[int2(id.x, cur.z)] != 0) { totalSpace.z++; cur.z++; } // Top
+    while (cur.w >= 0             && heightMap[int2(id.x, cur.w)] != 0) { totalSpace.w++; cur.w--; } // Bot
+    spaces[id.xy] = totalSpace; // Mind that the current tile is not included in the space count.
+}
+[numthreads(8,8,1)] void CalculateAreas(uint3 id: SV_DispatchThreadID) {    // 1
+    if (!isInBounds(id.xy) || heightMap[id.xy] == 0) { return; }
+    float inf = 1000000.0f; // Max height is the maximum height of the isle types. Clamp up to map size.
+    float maxHeight = min(max(max(max(isleTypeHeights.x, isleTypeHeights.y), isleTypeHeights.z), isleTypeHeights.w), texSize.y - id.y);
+
+    // Check how much area we have available with bottom-left as anchor. +1 to account for the current tile.
+    float4 minWidths = spaces[id.xy].x + 1; // First, find the minimum width on each row upwards, to use as 'area.x'.
+    for (int i = 1; i < maxHeight; i++) {   // Start at 1, since we already have the info from the first row,
+        float val = spaces[int2(id.x, id.y + i)].x + 1; // ..and go up until we reach the height of the isle type.
+        minWidths.x = min(minWidths.x, i < isleTypeHeights.x ? val : inf);
+        minWidths.y = min(minWidths.y, i < isleTypeHeights.y ? val : inf);
+        minWidths.z = min(minWidths.z, i < isleTypeHeights.z ? val : inf);
+        minWidths.w = min(minWidths.w, val);
+    }
+    minWidths *= isleTypeHeights <= maxHeight;  // Make sure isle types that don't fit within the allowed height have an area of 0.
+    areas[id.xy] = minWidths * isleTypeHeights; // The available area is the minimum_width times the height of the isle type.
+}
+
+// ------------------------------------------ 'Random' Retrieval ---------------------------------------------------------------
+// This is how we can retrieve a single random position on the CPU, negating the need to retrieve all positions and then pick one.
+RWStructuredBuffer<int> validCountBuffer; // Used to store the amount of valid positions we've found so far.
+half isleIndex;  // The index of the type isle we're retreiving a random spawn pos for.
+half minWidth;   // The minimum width of the isle type we're retreiving a random spawn pos for. Optional.
+half maxWidth;   // The maximum width of the isle type we're retreiving a random spawn pos for. Optional.
+int targetIndex; // The index of the position we want to return. This is set by the CPU, and is a random number between 0 and validCountBuffer[0].
+RWStructuredBuffer<half3> output; // Output buffer, used to return the a random position for an isle to spawn. The 3rd component is the available width.
+
+[numthreads(8, 8, 1)] void CountValidPositions(uint3 id : SV_DispatchThreadID) {   // 2
+    if (!isInBounds(id.xy) || heightMap[id.xy] == 0) { return; }
+    float availableWidth = areas[id.xy][isleIndex] / isleTypeHeights[isleIndex];
+    if (availableWidth < minWidth || availableWidth > maxWidth) { return; }
+    
+    InterlockedAdd(validCountBuffer[0], 1);
+}
+[numthreads(8, 8, 1)] void SelectPositionAtIndex(uint3 id : SV_DispatchThreadID) { // 3
+    if (!isInBounds(id.xy) || heightMap[id.xy] == 0) { return; }
+    float availableWidth = areas[id.xy][isleIndex] / isleTypeHeights[isleIndex];
+    if (availableWidth < minWidth || availableWidth > maxWidth) { return; }
+    
+    int localCounter = 0;
+    InterlockedAdd(validCountBuffer[0], -1, localCounter);
+    if (localCounter == targetIndex) { output[0] = half3(id.x, id.y, availableWidth); }
+}

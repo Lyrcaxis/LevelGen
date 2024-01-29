@@ -1,0 +1,22 @@
+#pragma kernel AddRectFromCenter
+#pragma kernel AddRectFromBottomLeft
+#pragma kernel AddCircleFromCenter
+#include "ComputeHelpers.hlsl"
+
+RWTexture2D<half> shape;      // Input and output shape (0 = empty, 1 = filled)
+half2 addPos; half2 addSize;  // Position to render on and size of the shape
+
+
+[numthreads(8,8,1)] void AddRectFromCenter(uint3 id: SV_DispatchThreadID) {     // 0
+    uint2 bL = uint2(addPos - addSize / 2); // Get the bottom left and top right corners.
+    uint2 tR = uint2(addPos + addSize / 2); //..and render if we're inside the rectangle.
+    shape[id.xy] = max(shape[id.xy], (id.x > bL.x && id.x < tR.x && id.y > bL.y && id.y < tR.y));
+}
+[numthreads(8,8,1)] void AddRectFromBottomLeft(uint3 id: SV_DispatchThreadID) { // 1
+    uint2 tR = uint2(addPos + addSize); // Render if we're inside the rectangle.
+    shape[id.xy] = max(shape[id.xy], (id.x >= uint(addPos.x) && id.x < tR.x && id.y >= uint(addPos.y) && id.y < tR.y));
+}
+[numthreads(8,8,1)] void AddCircleFromCenter(uint3 id: SV_DispatchThreadID) {   // 2
+    half2 dist = id.xy - addPos; // Render if distance from center is less than radius.
+    shape[id.xy] = max(shape[id.xy], (dist.x * dist.x + dist.y * dist.y < addSize.x * addSize.x / 3.7));
+}

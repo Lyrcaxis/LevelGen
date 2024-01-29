@@ -1,0 +1,15 @@
+#pragma kernel ContainsFlag
+#pragma kernel AddFlag
+#pragma kernel RemoveFlag
+#include "ComputeHelpers.hlsl"
+
+RWTexture2D<half> output;  // Input and output texture.
+half value; // Used for flag comparisons.
+
+// ------------------------------------ Flag Operations ------------------------------------
+// Contains: If output[id.xy] doesn't contain the 'value' flag, set it to 0, otherwise leave it as is.
+// Add:      If output[id.xy] doesn't contain the 'value' flag, add it,      otherwise leave it as is.
+// Remove:   If output[id.xy] contains the 'value' flag, remove it,          otherwise leave it as is.
+[numthreads(8, 8, 1)] void ContainsFlag(uint3 id: SV_DispatchThreadID)  { if ((uint(output[id.xy]) & uint(value)) != uint(value)) { output[id.xy] = 0; }; }     // 0
+[numthreads(8, 8, 1)] void AddFlag(uint3 id: SV_DispatchThreadID)       { if ((uint(output[id.xy]) & uint(value)) != uint(value)) { output[id.xy] += value; } } // 1
+[numthreads(8, 8, 1)] void RemoveFlag(uint3 id: SV_DispatchThreadID)    { if ((uint(output[id.xy]) & uint(value)) == uint(value)) { output[id.xy] -= value; } } // 2

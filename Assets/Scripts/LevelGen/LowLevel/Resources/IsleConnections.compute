@@ -1,0 +1,71 @@
+// This originally was intended to act as an option in the isle generation algorithm, but I didn't have time to implement it.
+// The idea was to have a compute shader that would check if a position could connect to another isle, and if so, how many connections it would have.
+// Then we would be able to implement a 'chance for isolated' control on the editor and have a better control of % for isolated or connected shapes.
+#pragma kernel ConnectsRight
+#pragma kernel ConnectsLeft
+#pragma kernel ConnectsTop
+#pragma kernel ConnectsBottom
+#include "ComputeHelpers.hlsl"
+
+Texture2D<half> heightMap; // Contains info on whether the pixel is occupied by an isle or not. 0 if empty, 1 if occupied.
+Texture2D<half4> areas;    // Available areas with Bottom-Left as anchor. Each component of the pixel is the area for a different isle type
+half4 isleTypeHeights;     // e.g: float4(3,5,7,10) if we want to calculate areas for isles of height 3, 5, 7 and 10 respectively.
+RWTexture2D<half4> masks;  // Each component of the pixel is a mask for a different isle type. 1 if the matches the criteria, 0 otherwise.
+half minConnectionsCount;  // Minimum amount of connections for a position to be valid
+
+
+// Only supports horizontal and vertical connections.
+void CheckConnections(uint3 id, int2 offset) {
+    if (!isInBounds(id.xy) || heightMap[id.xy] != 0) { return; }
+    float4 widths = areas[id.xy] / isleTypeHeights; // Width is the area divided by the height
+    float maxWidth = max(widths.x, max(widths.y, max(widths.z, widths.w)));
+    float maxHeight = max(isleTypeHeights.x, max(isleTypeHeights.y, max(isleTypeHeights.z, isleTypeHeights.w)));
+
+    // If the area is unavailable, or we are on the edge of the map and the offset is pointing outwards, we can't connect.
+    if ((maxWidth  == 0) || (id.x == 0 && offset.x < 0) || (id.x == texSize.x - 1 && offset.x > 0)) { return; }
+    if ((maxHeight == 0) || (id.y == 0 && offset.y < 0) || (id.y == texSize.y - 1 && offset.y > 0)) { return; }
+
+    // Now, based on the offset, we can determine which isle types we need to check for connections.
+    bool horizontal = offset.x != 0;
+    float4 limits = horizontal ? widths : isleTypeHeights;
+    float maxDim  = horizontal ? maxWidth : maxHeight;
+    int4 bonusX   = horizontal  * offset.x > 0 * widths;
+    int4 bonusY   = !horizontal * offset.y > 0 * isleTypeHeights;
+
+    // Store the amount of connections on the specified side for each isle type.
+    float4 connectionsAmounts = float4(0, 0, 0, 0); // x,y,z,w for each isle type respectively.
+    for (int i = 0; i < maxDim; i++) { // ..so we can save computation time by doing a single loop.
+        int2 idPos = int2(!horizontal * i, horizontal * i) + offset + id.xy;
+        connectionsAmounts.x += (i < limits.x) * (heightMap[idPos + int2(bonusX.x, bonusY.x)] == 1);
+        connectionsAmounts.y += (i < limits.y) * (heightMap[idPos + int2(bonusX.y, bonusY.y)] == 1);
+        connectionsAmounts.z += (i < limits.z) * (heightMap[idPos + int2(bonusX.z, bonusY.z)] == 1);
+        connectionsAmounts.w += (i < limits.w) * (heightMap[idPos + int2(bonusX.w, bonusY.w)] == 1);
+    }
+    // Finally, create a mask with whether the conditions for the minimum connections are met.
+    masks[id.xy] = connectionsAmounts >= minConnectionsCount;
+}
+
+[numthreads(8, 8, 1)] void ConnectsRight(uint3 id : SV_DispatchThreadID)  { CheckConnections(id, int2(1, 0)); }  // 0
+[numthreads(8, 8, 1)] void ConnectsLeft(uint3 id : SV_DispatchThreadID)   { CheckConnections(id, int2(-1, 0)); } // 1
+[numthreads(8, 8, 1)] void ConnectsTop(uint3 id : SV_DispatchThreadID)    { CheckConnections(id, int2(0, 1)); }  // 2
+[numthreads(8, 8, 1)] void ConnectsBottom(uint3 id : SV_DispatchThreadID) { CheckConnections(id, int2(0, -1)); } // 3
+
+// We don't need this, but if we did we could do like so:
+// void ConnectsDiagonally(uint3 id, int2 offset) {
+//     if (!isInBounds(id.xy) || heightMap[id.xy] != 0) { return; }
+//     float4 widths = areas[id.xy] / isleTypeHeights; // Width is the area divided by the height
+//     float maxWidth = max(widths.x, max(widths.y, max(widths.z, widths.w)));
+//     float maxHeight = max(isleTypeHeights.x, max(isleTypeHeights.y, max(isleTypeHeights.z, isleTypeHeights.w)));
+
+//     // If the area is unavailable, or we are on the edge of the map and the offset is pointing outwards, we can't connect.
+//     if ((maxWidth  == 0) || (id.x == 0 && offset.x < 0) || (id.x == texSize.x - 1 && offset.x > 0)) { return; }
+//     if ((maxHeight == 0) || (id.y == 0 && offset.y < 0) || (id.y == texSize.y - 1 && offset.y > 0)) { return; }
+
+//     // Store the amount of connections on the specified side for each isle type.
+//     float4 connectionsAmounts = float4(0, 0, 0, 0); // x,y,z,w for each isle type respectively.
+//     for (int i = 0; i < 4; i++) {
+//         if (areas[id.xy][i] == 0) { continue; }
+//         int2 idPos = id.xy + offset + int2((offset.x > 0) * widths[i], (offset.y > 0) * isleTypeHeights[i]);
+//         connectionsAmounts[i] = heightMap[idPos] == 1;
+//     }
+// }
